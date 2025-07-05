@@ -4,11 +4,12 @@ Coinbase exchange implementation for Wiggle Finder.
 Enhanced from EventScanner with improved 300-point limit handling and better error recovery.
 """
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
 
-from wiggle_common.models import Token, Price, ExchangeType, ChainType
+from wiggle_common.models import Token, Price, ExchangeType, ChainType, Liquidity
 from wiggle_finder.exchanges.base_exchange import BaseExchange
 
 logger = structlog.get_logger(__name__)
@@ -280,3 +281,57 @@ class CoinbaseExchange(BaseExchange):
             product["id"] == product_id 
             for product in self.supported_products
         )
+    
+    # Required abstract method implementations
+    def get_exchange_type(self) -> ExchangeType:
+        """Return exchange type"""
+        return ExchangeType.CEX
+    
+    def get_price(self, token: Token) -> Optional[Price]:
+        """Get current USD price for a token (sync wrapper)"""
+        try:
+            # This is a sync method, so we need to handle async properly
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're already in an async context, we can't use run_until_complete
+                logger.warning("get_price called from async context, use get_current_price instead")
+                return None
+            return loop.run_until_complete(self.get_current_price(token))
+        except Exception as e:
+            logger.error("Failed to get price", token=token.symbol, error=str(e))
+            return None
+    
+    def get_liquidity(self, token: Token) -> Optional[Liquidity]:
+        """Get liquidity information for a token"""
+        try:
+            # For Coinbase (CEX), we can estimate liquidity from 24h volume
+            product_id = self._get_coinbase_product_id(token.symbol)
+            if not product_id:
+                return None
+            
+            # This would need to be implemented with actual API calls
+            # For now, return a placeholder
+            logger.info("Liquidity calculation not yet implemented for Coinbase")
+            return None
+        except Exception as e:
+            logger.error("Failed to get liquidity", token=token.symbol, error=str(e))
+            return None
+    
+    def estimate_slippage(self, token: Token, trade_amount_usd: float) -> float:
+        """Estimate slippage percentage for a given trade size"""
+        try:
+            # For CEX like Coinbase, slippage is typically low
+            # Basic estimation based on trade size
+            if trade_amount_usd < 1000:
+                return 0.1  # 0.1% for small trades
+            elif trade_amount_usd < 10000:
+                return 0.2  # 0.2% for medium trades
+            else:
+                return 0.5  # 0.5% for large trades
+        except Exception as e:
+            logger.error("Failed to estimate slippage", token=token.symbol, error=str(e))
+            return 1.0  # Conservative 1% if calculation fails
+    
+    def is_token_supported(self, token: Token) -> bool:
+        """Check if token is supported on this exchange"""
+        return self.supports_token(token)
