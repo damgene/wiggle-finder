@@ -38,7 +38,7 @@ class BaseExchange(ExchangeInterface):
         
         # Rate limiting
         rate_limit = self.settings.get_exchange_rate_limit(name)
-        self.rate_limiter = RateLimiter(rate_limit, 60)  # per minute
+        self.rate_limiter = RateLimiter(rate_limit)  # requests per minute
         
         # HTTP client with timeouts and retries
         timeout = httpx.Timeout(self.settings.exchange.api_timeout_seconds)
@@ -110,8 +110,8 @@ class BaseExchange(ExchangeInterface):
         
         Enhanced from EventScanner with async support and better monitoring.
         """
-        # Apply rate limiting
-        await self.rate_limiter.acquire()
+        # Apply rate limiting  
+        self.rate_limiter.wait_if_needed()
         
         start_time = datetime.now()
         
@@ -120,6 +120,9 @@ class BaseExchange(ExchangeInterface):
             
             response = await self.client.request(method, url, **kwargs)
             response.raise_for_status()
+            
+            # Record successful request for rate limiting
+            self.rate_limiter.record_request()
             
             # Update performance metrics
             duration = (datetime.now() - start_time).total_seconds()
